@@ -223,6 +223,12 @@ def main():
         "Format: namespace/model_name[@revision]",
     )
     parser.add_argument(
+        "--enable-local-huggingface-models",
+        nargs="+",
+        default=[],
+        help="Experimental: Enable using AutoModelForCausalLM models from a local path."
+    )
+    parser.add_argument(
         "--enable-remote-models",
         nargs="+",
         default=[],
@@ -236,6 +242,8 @@ def main():
 
     for huggingface_model_name in args.enable_huggingface_models:
         register_huggingface_model_config(huggingface_model_name)
+    for huggingface_model_path in args.enable_local_huggingface_models:
+        register_huggingface_model_config(huggingface_model_path, local=True)
 
     if not args.local:
         check_and_register_remote_model(args.server_url, args.enable_remote_models)
