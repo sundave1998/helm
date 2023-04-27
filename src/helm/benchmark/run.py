@@ -1,3 +1,7 @@
+# enable debug
+import sys
+sys.path.append("../..")
+
 import argparse
 from dataclasses import replace
 import os
