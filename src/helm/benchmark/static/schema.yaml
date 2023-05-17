@@ -244,6 +244,12 @@ models:
     creator_organization: Google
     access: closed
     todo: true
+  
+  - name: /mnt/user/E-gaodawei.gdw-300905/raw/model/llama/7b
+    display_name: Llama(7B)
+    description: LLaMA in 7B version
+    creator_organization: meta
+    access: open
 
   # HazyResearch
   - name: together/h3-2.7b

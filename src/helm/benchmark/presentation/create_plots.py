@@ -128,6 +128,7 @@ class Plotter:
 
         schema = read_schema()
         self.model_metadata = {model_field.display_name: model_field for model_field in schema.models}
+        print(self.model_metadata.keys())
 
     def get_group_tables(self, group_name: str) -> Dict[str, Table]:
         """Reads and parses group tables. Uses _tables_cache to avoid reprocessing the same table multiple times."""
@@ -579,18 +580,26 @@ class Plotter:
 
     def create_all_plots(self):
         """Create all the plots used in the HELM paper."""
-        self.create_accuracy_v_x_plots()
-        self.create_correlation_plots()
-        self.create_leaderboard_plots()
-        self.create_all_accuracy_v_model_property_plots()
-        self.create_accuracy_v_access_bar_plot()
-        self.create_task_summary_plots()
-        self.create_targeted_eval_plots()
-        self.create_copyright_plot()
-        self.create_bbq_plot()
-        self.create_in_context_examples_plot()
-        self.create_mc_ablations_plot()
-        self.create_constrast_set_plots()
+        # avoid unfeasible plotting
+        plot_funcs = [
+            self.create_accuracy_v_x_plots,
+            self.create_correlation_plots,
+            self.create_leaderboard_plots,
+            self.create_all_accuracy_v_model_property_plots,
+            self.create_accuracy_v_access_bar_plot,
+            self.create_task_summary_plots,
+            self.create_targeted_eval_plots,
+            self.create_copyright_plot,
+            self.create_bbq_plot,
+            self.create_in_context_examples_plot,
+            self.create_mc_ablations_plot,
+            self.create_constrast_set_plots
+        ]
+        for plot_func in plot_funcs:
+            try:
+                plot_func()
+            except Exception as e:
+                hlog(f"WARNING: {plot_func.__name__} failed: {e}")
 
 
 def main():

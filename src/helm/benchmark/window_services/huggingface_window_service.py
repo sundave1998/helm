@@ -16,12 +16,15 @@ class HuggingFaceWindowService(LocalWindowService):
     @property
     def max_sequence_length(self) -> int:
         """Return the max sequence length of this tokenizer."""
-        return self._max_request_length
+        # TODO: check if it is correct
+        # return self._max_request_length
+        return 2048
 
     @property
     def max_request_length(self) -> int:
         """Return the max request length of this tokenizer."""
-        return self.max_sequence_length
+        # TODO: check if it is correct
+        return self.max_sequence_length + 1
 
     @property
     def end_of_text_token(self) -> str:

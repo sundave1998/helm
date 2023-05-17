@@ -484,7 +484,8 @@ def get_bias_metric_specs() -> List[MetricSpec]:
 def get_generative_harms_metric_specs(include_basic_metrics: bool = False) -> List[MetricSpec]:
     return (
         get_bias_metric_specs()
-        + get_toxicity_metric_specs()
+        # ignore toxicity for the usage of google search api 
+        # + get_toxicity_metric_specs()
         + (get_basic_metric_specs([]) if include_basic_metrics else [])
     )
 

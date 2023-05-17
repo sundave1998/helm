@@ -1,6 +1,10 @@
+# enable debug
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
+
 import argparse
 from dataclasses import replace
-import os
 from typing import List, Optional
 
 from helm.benchmark.presentation.run_entry import RunEntry, read_run_entries

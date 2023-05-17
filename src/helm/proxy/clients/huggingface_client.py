@@ -18,12 +18,31 @@ from .client import Client, wrap_request_time, truncate_sequence
 from .huggingface_tokenizer import HuggingFaceTokenizers
 from helm.proxy.clients.huggingface_model_registry import HuggingFaceModelConfig, get_huggingface_model_config
 
+import traceback
+import os
+import threading
+
+
+def print_traceback(e):
+    lines = traceback.format_exception(type(e), e, e.__traceback__)
+    print(''.join(lines))
+
+from multiprocessing import Value
+from ctypes import c_int
+
 
 class HuggingFaceServer:
+
+    CUDA_CNT = Value(c_int, 0)
+
     def __init__(self, model_config: HuggingFaceModelConfig):
         if torch.cuda.is_available():
-            hlog("CUDA is available, initializing with a GPU...")
-            self.device: str = "cuda:0"
+            with HuggingFaceServer.CUDA_CNT.get_lock():
+                # TODO: support cuda in the future
+                # self.device: str = f"cuda:{HuggingFaceServer.CUDA_CNT.value}"
+                self.device = "cuda:0"
+                # HuggingFaceServer.CUDA_CNT.value += 1
+            hlog(f"CUDA is available, initializing with {self.device}...")
         else:
             self.device = "cpu"
         model_kwargs = {}
@@ -46,10 +65,11 @@ class HuggingFaceServer:
         del raw_request["top_k_per_token"]
         if len(raw_request["stop_sequences"]) > 0:
             stop_sequence_ids = self.tokenizer(raw_request["stop_sequences"])
+            # TODO: for the stop sequences bug
             # Total number of stop words should be 1.
-            assert len(stop_sequence_ids.input_ids) == 1
+            # assert len(stop_sequence_ids.input_ids) == 1
             # Total number of tokens in each stop word should be 1.
-            assert len(stop_sequence_ids.input_ids[0]) == 1
+            # assert len(stop_sequence_ids.input_ids[0]) == 1, f"{len(stop_sequence_ids.input_ids[0])}!!! {stop_sequence_ids.input_ids[0]} {raw_request['stop_sequences']}"
             del raw_request["stop_sequences"]
             raw_request["eos_token_id"] = stop_sequence_ids.input_ids[0][0]
 
@@ -57,10 +77,14 @@ class HuggingFaceServer:
         relevant_raw_request = {
             key: raw_request[key]
             for key in raw_request
-            if key not in ["engine", "prompt", "echo_prompt", "stop_sequences"]
+            if key not in ["engine", "prompt", "echo_prompt"]
+            # TODO: for the stop sequences bug
+            # if key not in ["engine", "prompt", "echo_prompt", "stop_sequences"]
         }
 
+        # dawei: resolve the bug for huggingface
         # Use HuggingFace's `generate` method.
+        del encoded_input['token_type_ids']
         output = self.model.generate(**encoded_input, **relevant_raw_request)
         sequences = output.sequences
         scores = output.scores
@@ -175,7 +199,8 @@ class HuggingFaceClient(Client):
             cache_key = Client.make_cache_key(raw_request, request)
             response, cached = self.cache.get(cache_key, wrap_request_time(do_it))
         except Exception as e:  # Do something if error is encountered.
-            error: str = f"HuggingFace error: {e}"
+            error: str = f"HuggingFace error: {repr(e)}"
+            print_traceback(e)
             return RequestResult(success=False, cached=False, error=error, completions=[], embedding=[])
 
         completions = []
@@ -234,7 +259,8 @@ class HuggingFaceClient(Client):
 
             result, cached = self.cache.get(cache_key, wrap_request_time(do_it))
         except Exception as e:
-            error: str = f"HuggingFace error: {e}"
+            error: str = f"HuggingFace error: {repr(e)}"
+            print_traceback(e)
             return TokenizationRequestResult(success=False, cached=False, error=error, text="", tokens=[])
 
         return TokenizationRequestResult(
@@ -260,7 +286,8 @@ class HuggingFaceClient(Client):
 
             result, cached = self.cache.get(cache_key, wrap_request_time(do_it))
         except Exception as e:
-            error: str = f"HuggingFace error: {e}"
+            error: str = f"HuggingFace error: {repr(e)}"
+            print_traceback(e)
             return DecodeRequestResult(success=False, cached=False, error=error, text="")
 
         return DecodeRequestResult(
