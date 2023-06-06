@@ -16,6 +16,8 @@ from helm.benchmark.executor import ExecutionSpec
 from helm.benchmark.runner import Runner, RunSpec
 from helm.benchmark.run_specs import construct_run_specs
 
+import transformers
+from helm.models.modeling_megatron_llama import MegatronLlamaForCausalLM, MegatronLlamaConfig
 
 LATEST_SYMLINK: str = "latest"
 
@@ -240,10 +242,16 @@ def main():
     args = parser.parse_args()
     validate_args(args)
 
+    # dawei: register local model
+    transformers.AutoConfig.register(MegatronLlamaConfig.model_type, MegatronLlamaConfig)
+    transformers.AutoModelForCausalLM.register(MegatronLlamaConfig, MegatronLlamaForCausalLM)
+
     for huggingface_model_name in args.enable_huggingface_models:
         register_huggingface_model_config(huggingface_model_name)
     for huggingface_model_path in args.enable_local_huggingface_models:
-        register_huggingface_model_config(huggingface_model_path, local=True)
+        # TODO: more elegant
+        display_name = "/".join(huggingface_model_path.split("/")[-3:])
+        register_huggingface_model_config(huggingface_model_path, display_name=display_name, local=True)
 
     if not args.local:
         check_and_register_remote_model(args.server_url, args.enable_remote_models)

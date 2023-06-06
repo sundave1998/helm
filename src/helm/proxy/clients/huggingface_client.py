@@ -52,6 +52,7 @@ class HuggingFaceServer:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_config.model_id, trust_remote_code=True, **model_kwargs
             ).to(self.device)
+        hlog(f"{type(self.model)}, {self.model.__class__}")
         with htrack_block(f"Loading Hugging Face tokenizer model for config {model_config}"):
             self.tokenizer = AutoTokenizer.from_pretrained(model_config.model_id, **model_kwargs)
 
@@ -64,12 +65,8 @@ class HuggingFaceServer:
         top_k_per_token: int = raw_request["top_k_per_token"]
         del raw_request["top_k_per_token"]
         if len(raw_request["stop_sequences"]) > 0:
-            stop_sequence_ids = self.tokenizer(raw_request["stop_sequences"])
-            # TODO: for the stop sequences bug
-            # Total number of stop words should be 1.
-            # assert len(stop_sequence_ids.input_ids) == 1
-            # Total number of tokens in each stop word should be 1.
-            # assert len(stop_sequence_ids.input_ids[0]) == 1, f"{len(stop_sequence_ids.input_ids[0])}!!! {stop_sequence_ids.input_ids[0]} {raw_request['stop_sequences']}"
+            stop_sequence_ids = self.tokenizer(raw_request["stop_sequences"], return_token_type_ids=False)
+            assert len(stop_sequence_ids.input_ids) == 1, f"Total number of stop words should be 1 rather than {stop_sequence_ids.input_ids}"
             del raw_request["stop_sequences"]
             raw_request["eos_token_id"] = stop_sequence_ids.input_ids[0][0]
 
@@ -77,9 +74,9 @@ class HuggingFaceServer:
         relevant_raw_request = {
             key: raw_request[key]
             for key in raw_request
-            if key not in ["engine", "prompt", "echo_prompt"]
+            # if key not in ["engine", "prompt", "echo_prompt"]
             # TODO: for the stop sequences bug
-            # if key not in ["engine", "prompt", "echo_prompt", "stop_sequences"]
+            if key not in ["engine", "prompt", "echo_prompt", "stop_sequences"]
         }
 
         # dawei: resolve the bug for huggingface
@@ -119,7 +116,7 @@ class HuggingFaceServer:
 
         # TODO: Get rid of the extra tokenization?
         all_tokens = [self.tokenizer.convert_ids_to_tokens(sequence) for sequence in sequences]
-        all_decoded_text = self.tokenizer.batch_decode(sequences)
+        all_decoded_text = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
 
         completions = []
         for (decoded_text, tokens, logprobs_of_chosen_tokens, top_logprobs_dicts) in zip(

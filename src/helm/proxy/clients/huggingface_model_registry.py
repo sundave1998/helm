@@ -82,7 +82,7 @@ class HuggingFaceModelConfig:
     def from_path(path: str) -> "HuggingFaceModelConfig":
         """Genertes a HuggingFaceModelConfig from a (relative or absolute) path to a local HuggingFace model."""
         model_name = path.split("/")[-1]
-        assert model_name
+        assert model_name, f"path: {path}, model_name: {model_name}"
         return HuggingFaceModelConfig(
             namespace="local",
             model_name=model_name,
@@ -93,7 +93,7 @@ class HuggingFaceModelConfig:
 _huggingface_model_registry: Dict[str, HuggingFaceModelConfig] = {}
 
 
-def register_huggingface_model_config(model_name: str, local: bool = False) -> HuggingFaceModelConfig:
+def register_huggingface_model_config(model_name: str, display_name: str = None, local: bool = False) -> HuggingFaceModelConfig:
     """Register a AutoModelForCausalLM model from Hugging Face Model Hub or a local directory for later use.
 
     model_name format: namespace/model_name[@revision] OR just a path to your HF model"""
@@ -113,10 +113,12 @@ def register_huggingface_model_config(model_name: str, local: bool = False) -> H
     description = f"HuggingFace model {config.model_id}"
     if config.revision:
         description += f" at revision {config.revision}"
+    if display_name is None:
+        display_name = model_name
     model = Model(
         group=config.namespace,
         name=model_name,
-        display_name=model_name,
+        display_name=display_name,
         creator_organization=config.namespace,
         description=description,
         tags=[TEXT_MODEL_TAG, FULL_FUNCTIONALITY_TEXT_MODEL_TAG],

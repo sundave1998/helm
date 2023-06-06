@@ -34,13 +34,23 @@ class HuggingFaceTokenizers:
                 # From https://huggingface.co/course/chapter6/3, "slow tokenizers are those written in Python inside
                 # the Hugging Face Transformers library, while the fast versions are the ones provided by Hugging Face
                 # Tokenizers, which are written in Rust." So, use the "fast" version of the tokenizers if available.
-                return AutoTokenizer.from_pretrained(
-                    hf_tokenizer_name, local_files_only=True, use_fast=True, **tokenizer_kwargs
+                tokenizer =  AutoTokenizer.from_pretrained(
+                    hf_tokenizer_name, local_files_only=True, use_fast=False, **tokenizer_kwargs
                 )
+
+                # print special token
+                print("Tokenizer INFO:")
+                print(f"tokenizer.__class__: {tokenizer.__class__}")
+                print(f"tokenizer.pad_token: |{tokenizer.pad_token_id}|{repr(tokenizer.pad_token)}|")
+                print(f"tokenizer.bos_token: |{tokenizer.bos_token_id}|{repr(tokenizer.bos_token)}|")
+                print(f"tokenizer.eos_token: |{tokenizer.eos_token_id}|{repr(tokenizer.eos_token)}|")
+                print(f"tokenizer.unk_token: |{tokenizer.unk_token_id}|{repr(tokenizer.unk_token)}|")
+
+                return tokenizer
             except OSError:
                 hlog(f"Local files do not exist for HuggingFace tokenizer: {hf_tokenizer_name}. Downloading...")
                 return AutoTokenizer.from_pretrained(
-                    hf_tokenizer_name, local_files_only=False, use_fast=True, **tokenizer_kwargs
+                    hf_tokenizer_name, local_files_only=False, use_fast=False, **tokenizer_kwargs
                 )
 
         if tokenizer_name not in HuggingFaceTokenizers.tokenizers:
