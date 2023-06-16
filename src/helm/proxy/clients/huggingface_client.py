@@ -158,7 +158,11 @@ class HuggingFaceServer:
 
         # TODO: Get rid of the extra tokenization?
         all_tokens = [self.tokenizer.convert_ids_to_tokens(sequence) for sequence in sequences]
-        all_decoded_text = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
+        all_tokens = [
+            [self.tokenizer.convert_tokens_to_string([token]) for token in sequence_tokens]
+            for sequence_tokens in all_tokens
+        ]
+        all_decoded_text = self.tokenizer.batch_decode(sequences)
 
         completions = []
         for (decoded_text, tokens, logprobs_of_chosen_tokens, top_logprobs_dicts) in zip(
@@ -196,9 +200,9 @@ class HuggingFaceClient(Client):
                 self.model_server_instances[model] = HuggingFaceServer(
                     HuggingFaceModelConfig.from_string("bigcode/santacoder")
                 )
-            elif model == "huggingface/large-model":
+            elif model == "huggingface/starcoder":
                 self.model_server_instances[model] = HuggingFaceServer(
-                    HuggingFaceModelConfig.from_string("bigcode/large-model")
+                    HuggingFaceModelConfig.from_string("bigcode/starcoder")
                 )
             else:
                 raise Exception(f"Unknown HuggingFace model: {model}")
@@ -293,7 +297,16 @@ class HuggingFaceClient(Client):
                     else:
                         tokens = tokenizer.encode(request.text, add_special_tokens=False)
                 else:
-                    tokens = tokenizer.tokenize(request.text)
+                    if "gpt" in request.tokenizer or request.tokenizer in [
+                        "bigscience/bloom",
+                        "Writer/palmyra-base",
+                        "facebook/opt-66b",
+                    ]:
+                        tokens = [tokenizer.convert_tokens_to_string([i]) for i in tokenizer.tokenize(request.text)]
+                    else:
+                        tokens = tokenizer.tokenize(request.text)
+                        # TODO(1522): Reenable this to revove "▁"
+                        # tokens = [tokenizer.convert_tokens_to_string([i]) for i in tokenizer.tokenize(request.text)]
                 return {"tokens": tokens}
 
             result, cached = self.cache.get(cache_key, wrap_request_time(do_it))

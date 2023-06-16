@@ -1,5 +1,5 @@
 import itertools
-from typing import Any, Callable, List, Dict, Optional, Set
+from typing import Any, Callable, List, Dict, Optional, Set, TypeVar
 
 from helm.common.hierarchical_logger import hlog, htrack
 from helm.common.object_spec import ObjectSpec
@@ -19,7 +19,9 @@ from .run_expander import (
     GlobalPrefixRunExpander,
     StopRunExpander,
     ChatMLRunExpander,
+    AddToStopRunExpander,
     IncreaseMaxTokensRunExpander,
+    FormatPromptRunExpander,
     IncreaseTemperatureRunExpander,
 )
 from .runner import RunSpec
@@ -48,9 +50,12 @@ from helm.proxy.models import (
     NLG_PREFIX_TAG,
     CHATML_MODEL_TAG,
     OPENAI_CHATGPT_MODEL_TAG,
+    ANTHROPIC_MODEL_TAG,
     BUGGY_TEMP_0_TAG,
 )
 from helm.common.general import singleton
+import anthropic
+from helm.proxy.clients.anthropic_client import AnthropicClient
 
 
 ############################################################
@@ -308,6 +313,29 @@ def get_generation_adapter_spec(
     )
 
 
+def get_instruct_adapter_spec(
+    num_outputs: int = 1,
+    max_tokens: int = 512,
+    temperature: float = 0.7,
+) -> AdapterSpec:
+    """
+    Zero-shot instruction-following.
+    """
+    return AdapterSpec(
+        method=ADAPT_GENERATION,
+        instructions="",
+        input_prefix="",
+        input_suffix="\n",
+        output_prefix="",
+        output_suffix="",
+        max_train_instances=0,
+        num_outputs=num_outputs,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        stop_sequences=[],
+    )
+
+
 def get_language_modeling_adapter_spec() -> AdapterSpec:
     """
     Used for language modeling.
@@ -496,6 +524,15 @@ def get_summarization_metric_specs(args: Dict[str, Any]) -> List[MetricSpec]:
     ] + get_basic_metric_specs([])
 
 
+def get_summarization_critique_metric_specs(num_respondents: int) -> List[MetricSpec]:
+    return [
+        MetricSpec(
+            class_name="helm.benchmark.summarization_critique_metrics.SummarizationCritiqueMetric",
+            args={"num_respondents": num_respondents},
+        )
+    ]
+
+
 def get_srn_metric_specs() -> List[MetricSpec]:
     return get_basic_metric_specs(["f1_set_match", "iou_set_match", "exact_set_match"])
 
@@ -567,10 +604,34 @@ def get_machine_translation_metric_specs() -> List[MetricSpec]:
     ] + get_basic_metric_specs([])
 
 
+def get_verifiability_judgment_metric_specs() -> List[MetricSpec]:
+    return get_basic_metric_specs(["exact_match", "quasi_exact_match"])
+
+
 ############################################################
 # Run specs
 
 
+CANONICAL_RUN_SPEC_FUNCS: Dict[str, Callable[..., RunSpec]] = {}
+"""Dict of run spec function names to run spec functions."""
+
+
+F = TypeVar("F", bound=Callable[..., RunSpec])
+
+
+def run_spec_function(name: str) -> Callable[[F], F]:
+    """Register the run spec function under the given name."""
+
+    def wrap(func: F) -> F:
+        if name in CANONICAL_RUN_SPEC_FUNCS:
+            raise ValueError(f"A run spec function with name {name} already exists")
+        CANONICAL_RUN_SPEC_FUNCS[name] = func
+        return func
+
+    return wrap
+
+
+@run_spec_function("simple1")
 def get_simple1_spec() -> RunSpec:
     """A run spec for debugging."""
     return RunSpec(
@@ -582,6 +643,7 @@ def get_simple1_spec() -> RunSpec:
     )
 
 
+@run_spec_function("bbq")
 def get_bbq_spec(subject: str, method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.bbq_scenario.BBQScenario", args={"subject": subject}
@@ -603,6 +665,7 @@ def get_bbq_spec(subject: str, method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> Run
     )
 
 
+@run_spec_function("msmarco")
 def get_msmarco_spec(track: str, valid_topk: Optional[int] = None) -> RunSpec:
     valid_topk = None if valid_topk is None else int(valid_topk)
     scenario_spec = ScenarioSpec(
@@ -621,6 +684,7 @@ def get_msmarco_spec(track: str, valid_topk: Optional[int] = None) -> RunSpec:
     )
 
 
+@run_spec_function("bold")
 def get_bold_spec(subject: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.bold_scenario.BOLDScenario", args={"subject": subject}
@@ -640,6 +704,7 @@ def get_bold_spec(subject: str) -> RunSpec:
     )
 
 
+@run_spec_function("civil_comments")
 def get_civil_comments_spec(demographic: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario",
@@ -659,6 +724,7 @@ def get_civil_comments_spec(demographic: str) -> RunSpec:
     )
 
 
+@run_spec_function("mmlu")
 def get_mmlu_spec(subject: str, method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.mmlu_scenario.MMLUScenario", args={"subject": subject}
@@ -680,6 +746,7 @@ def get_mmlu_spec(subject: str, method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> Ru
     )
 
 
+@run_spec_function("interactive_qa_mmlu")
 def get_interactive_qa_mmlu_spec(subject: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.interactive_qa_mmlu_scenario.InteractiveQAMMLUScenario",
@@ -701,6 +768,7 @@ def get_interactive_qa_mmlu_spec(subject: str) -> RunSpec:
     )
 
 
+@run_spec_function("wikifact")
 def get_wikifact_spec(k: str, subject: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario",
@@ -726,6 +794,7 @@ def get_wikifact_spec(k: str, subject: str) -> RunSpec:
     )
 
 
+@run_spec_function("commonsense")
 def get_commonsense_spec(dataset: str, method: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.commonsense_scenario.CommonSenseScenario",
@@ -748,6 +817,7 @@ def get_commonsense_spec(dataset: str, method: str) -> RunSpec:
     )
 
 
+@run_spec_function("quac")
 def get_quac_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(class_name="helm.benchmark.scenarios.quac_scenario.QuACScenario", args={})
 
@@ -762,6 +832,7 @@ def get_quac_spec() -> RunSpec:
     )
 
 
+@run_spec_function("news_qa")
 def get_news_qa_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(class_name="helm.benchmark.scenarios.newsqa_scenario.NewsQAScenario", args={})
 
@@ -777,6 +848,7 @@ def get_news_qa_spec() -> RunSpec:
     )
 
 
+@run_spec_function("truthful_qa")
 def get_truthful_qa_spec(task: str, method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.truthful_qa_scenario.TruthfulQAScenario",
@@ -796,6 +868,7 @@ def get_truthful_qa_spec(task: str, method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -
     )
 
 
+@run_spec_function("twitter_aae")
 def get_twitter_aae_spec(demographic: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.twitter_aae_scenario.TwitterAAEScenario",
@@ -811,6 +884,7 @@ def get_twitter_aae_spec(demographic: str) -> RunSpec:
     )
 
 
+@run_spec_function("real_toxicity_prompts")
 def get_real_toxicity_prompts_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.real_toxicity_prompts_scenario.RealToxicityPromptsScenario", args={}
@@ -838,6 +912,7 @@ def get_real_toxicity_prompts_spec() -> RunSpec:
     )
 
 
+@run_spec_function("synthetic_reasoning_natural")
 def get_synthetic_reasoning_natural_spec(difficulty: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.synthetic_reasoning_natural_scenario.SRNScenario",
@@ -862,6 +937,7 @@ def get_synthetic_reasoning_natural_spec(difficulty: str) -> RunSpec:
     )
 
 
+@run_spec_function("gsm")
 def get_gsm_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(class_name="helm.benchmark.scenarios.gsm_scenario.GSM8KScenario", args={})
 
@@ -883,6 +959,7 @@ def get_gsm_spec() -> RunSpec:
     )
 
 
+@run_spec_function("raft")
 def get_raft_spec(subset: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.raft_scenario.RAFTScenario", args={"subset": subset}
@@ -906,6 +983,7 @@ def get_raft_spec(subset: str) -> RunSpec:
     )
 
 
+@run_spec_function("numeracy")
 def get_numeracy_spec(
     relation_type: str = "linear", mode: str = "function", seed: str = "0", run_solver: str = "False"
 ) -> RunSpec:
@@ -954,6 +1032,7 @@ def get_numeracy_spec(
     )
 
 
+@run_spec_function("math")
 def get_math_spec(
     subject: str,
     level: str,
@@ -1014,6 +1093,7 @@ def get_math_spec(
     )
 
 
+@run_spec_function("boolq")
 def get_boolq_spec(only_contrast=False) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.boolq_scenario.BoolQScenario", args={"only_contrast": only_contrast}
@@ -1030,6 +1110,7 @@ def get_boolq_spec(only_contrast=False) -> RunSpec:
     )
 
 
+@run_spec_function("lsat_qa")
 def get_lsat_qa_spec(task: str, method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.lsat_qa_scenario.LSATScenario", args={"task": task}
@@ -1052,6 +1133,7 @@ def get_lsat_qa_spec(task: str, method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> Ru
     )
 
 
+@run_spec_function("imdb")
 def get_imdb_spec(only_contrast=False) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.imdb_scenario.IMDBScenario", args={"only_contrast": only_contrast}
@@ -1068,6 +1150,7 @@ def get_imdb_spec(only_contrast=False) -> RunSpec:
     )
 
 
+@run_spec_function("babi_qa")
 def get_babi_qa_spec(task: str = "all") -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario", args={"task": task}
@@ -1085,6 +1168,7 @@ def get_babi_qa_spec(task: str = "all") -> RunSpec:
     )
 
 
+@run_spec_function("copyright")
 def get_copyright_spec(
     datatag="pilot",
     temperature=0.2,
@@ -1114,6 +1198,7 @@ def get_copyright_spec(
     )
 
 
+@run_spec_function("disinformation")
 def get_disinformation_spec(capability: str = "reiteration", topic: Optional[str] = "covid") -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.disinformation_scenario.DisinformationScenario",
@@ -1176,6 +1261,7 @@ def get_disinformation_spec(capability: str = "reiteration", topic: Optional[str
     )
 
 
+@run_spec_function("code")
 def get_code_spec(dataset: str, timeout=3) -> RunSpec:
     # `timeout` trades accuracy for time. Used exclusively for APPS. Default from original APPS codebase.
     scenario_spec = ScenarioSpec(
@@ -1212,6 +1298,7 @@ def get_code_spec(dataset: str, timeout=3) -> RunSpec:
     )
 
 
+@run_spec_function("natural_qa")
 def get_natural_qa_spec(mode: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario", args={"mode": mode}
@@ -1232,6 +1319,7 @@ def get_natural_qa_spec(mode: str) -> RunSpec:
     )
 
 
+@run_spec_function("the_pile")
 def get_the_pile_spec(subset: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.the_pile_scenario.ThePileScenario", args={"subset": subset}
@@ -1246,6 +1334,7 @@ def get_the_pile_spec(subset: str) -> RunSpec:
     )
 
 
+@run_spec_function("ice")
 def get_ice_spec(**kwargs) -> RunSpec:
     scenario_spec = ScenarioSpec(class_name="helm.benchmark.scenarios.ice_scenario.ICEScenario", args=kwargs)
 
@@ -1258,6 +1347,7 @@ def get_ice_spec(**kwargs) -> RunSpec:
     )
 
 
+@run_spec_function("narrative_qa")
 def get_narrativeqa_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.narrativeqa_scenario.NarrativeQAScenario", args={}
@@ -1278,6 +1368,7 @@ def get_narrativeqa_spec() -> RunSpec:
     )
 
 
+@run_spec_function("synthetic_efficiency")
 def get_synthetic_efficiency_spec(
     num_prompt_tokens: Optional[int] = None,
     num_output_tokens: Optional[int] = None,
@@ -1303,6 +1394,7 @@ def get_synthetic_efficiency_spec(
     )
 
 
+@run_spec_function("synthetic_reasoning")
 def get_synthetic_reasoning_spec(mode: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario",
@@ -1326,6 +1418,7 @@ def get_synthetic_reasoning_spec(mode: str) -> RunSpec:
     )
 
 
+@run_spec_function("wikitext_103")
 def get_wikitext_103_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.wikitext_103_scenario.Wikitext103Scenario", args={}
@@ -1340,6 +1433,7 @@ def get_wikitext_103_spec() -> RunSpec:
     )
 
 
+@run_spec_function("blimp")
 def get_blimp_spec(phenomenon: str, method: str = ADAPT_MULTIPLE_CHOICE_SEPARATE_ORIGINAL) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.blimp_scenario.BLiMPScenario", args={"phenomenon": phenomenon}
@@ -1362,6 +1456,7 @@ def get_blimp_spec(phenomenon: str, method: str = ADAPT_MULTIPLE_CHOICE_SEPARATE
     )
 
 
+@run_spec_function("summarization_xsum")
 def get_xsum_summarization_spec(temperature: float = 0.3, device: str = "cpu") -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.summarization_scenario.SummarizationScenario",
@@ -1384,6 +1479,7 @@ def get_xsum_summarization_spec(temperature: float = 0.3, device: str = "cpu") -
     )
 
 
+@run_spec_function("summarization_xsum_sampled")
 def get_xsum_sampled_summarization_spec(temperature: float = 0.3, device: str = "cpu") -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.summarization_scenario.SummarizationScenario",
@@ -1411,6 +1507,7 @@ def get_xsum_sampled_summarization_spec(temperature: float = 0.3, device: str = 
     )
 
 
+@run_spec_function("summarization_cnndm")
 def get_cnndm_summarization_spec(temperature: float = 0.3, device: str = "cpu") -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.summarization_scenario.SummarizationScenario",
@@ -1433,6 +1530,7 @@ def get_cnndm_summarization_spec(temperature: float = 0.3, device: str = "cpu") 
     )
 
 
+@run_spec_function("empatheticdialogues")
 def get_empatheticdialogues_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.dialogue_scenarios.EmpatheticDialoguesScenario", args={}
@@ -1458,6 +1556,7 @@ def get_empatheticdialogues_spec() -> RunSpec:
     )
 
 
+@run_spec_function("dyck_language")
 def get_dyck_language_spec(num_parenthesis_pairs: int) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.dyck_language_scenario.DyckLanguageScenario",
@@ -1482,6 +1581,7 @@ def get_dyck_language_spec(num_parenthesis_pairs: int) -> RunSpec:
     )
 
 
+@run_spec_function("legal_support")
 def get_legal_support_spec(method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.legal_support_scenario.LegalSupportScenario", args={}
@@ -1505,6 +1605,7 @@ def get_legal_support_spec(method: str = ADAPT_MULTIPLE_CHOICE_JOINT) -> RunSpec
     )
 
 
+@run_spec_function("entity_matching")
 def get_entity_matching_spec(dataset: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario", args={"dataset": dataset}
@@ -1524,6 +1625,7 @@ def get_entity_matching_spec(dataset: str) -> RunSpec:
     )
 
 
+@run_spec_function("entity_data_imputation")
 def get_entity_data_imputation_spec(dataset: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.entity_data_imputation_scenario.EntityDataImputationScenario",
@@ -1542,6 +1644,7 @@ def get_entity_data_imputation_spec(dataset: str) -> RunSpec:
 
 
 @htrack("Extracting adaptation parameters from the BIG-bench task definition and building the RunSpec")
+@run_spec_function("big_bench")
 def get_big_bench_spec(task: str, subtask: str) -> RunSpec:
     def get_adaptation_method(big_bench_metrics: List[str]) -> str:
         """
@@ -1629,6 +1732,7 @@ def get_big_bench_spec(task: str, subtask: str) -> RunSpec:
     )
 
 
+@run_spec_function("covid_dialog")
 def get_covid_dialog_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.covid_dialog_scenario.COVIDDialogScenario", args={}
@@ -1650,6 +1754,7 @@ def get_covid_dialog_spec() -> RunSpec:
     )
 
 
+@run_spec_function("me_q_sum")
 def get_me_q_sum_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(class_name="helm.benchmark.scenarios.me_q_sum_scenario.MeQSumScenario", args={})
 
@@ -1668,6 +1773,7 @@ def get_me_q_sum_spec() -> RunSpec:
     )
 
 
+@run_spec_function("med_dialog")
 def get_med_dialog_spec(subset: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.med_dialog_scenario.MedDialogScenario", args={"subset": subset}
@@ -1688,6 +1794,7 @@ def get_med_dialog_spec(subset: str) -> RunSpec:
     )
 
 
+@run_spec_function("med_mcqa")
 def get_med_mcqa_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(class_name="helm.benchmark.scenarios.med_mcqa_scenario.MedMCQAScenario", args={})
 
@@ -1707,6 +1814,7 @@ def get_med_mcqa_spec() -> RunSpec:
     )
 
 
+@run_spec_function("med_paragraph_simplification")
 def get_med_paragraph_simplification_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.med_paragraph_simplification_scenario.MedParagraphSimplificationScenario",
@@ -1728,6 +1836,7 @@ def get_med_paragraph_simplification_spec() -> RunSpec:
     )
 
 
+@run_spec_function("med_qa")
 def get_med_qa_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(class_name="helm.benchmark.scenarios.med_qa_scenario.MedQAScenario", args={})
 
@@ -1747,6 +1856,7 @@ def get_med_qa_spec() -> RunSpec:
     )
 
 
+@run_spec_function("pubmed_qa")
 def get_pubmed_qa_spec() -> RunSpec:
     scenario_spec = ScenarioSpec(class_name="helm.benchmark.scenarios.pubmed_qa_scenario.PubMedQAScenario", args={})
 
@@ -1774,6 +1884,7 @@ def build_classification_metrics(task_type):
     return []
 
 
+@run_spec_function("lextreme")
 def get_lextreme_spec(subset: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.lextreme_scenario.LEXTREMEScenario",
@@ -1797,6 +1908,7 @@ def get_lextreme_spec(subset: str) -> RunSpec:
     )
 
 
+@run_spec_function("lex_glue")
 def get_lex_glue_spec(subset: str) -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.lex_glue_scenario.LexGLUEScenario",
@@ -1820,6 +1932,7 @@ def get_lex_glue_spec(subset: str) -> RunSpec:
     )
 
 
+@run_spec_function("billsum_legal_summarization")
 def get_billsum_legal_summarization_spec(temperature: float = 0.3, device: str = "cpu") -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.legal_summarization_scenario.LegalSummarizationScenario",
@@ -1847,6 +1960,7 @@ def get_billsum_legal_summarization_spec(temperature: float = 0.3, device: str =
     )
 
 
+@run_spec_function("multilexsum_legal_summarization")
 def get_multilexsum_legal_summarization_spec(temperature: float = 0.3, device: str = "cpu") -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.legal_summarization_scenario.LegalSummarizationScenario",
@@ -1874,6 +1988,7 @@ def get_multilexsum_legal_summarization_spec(temperature: float = 0.3, device: s
     )
 
 
+@run_spec_function("eurlexsum_legal_summarization")
 def get_eurlexsum_legal_summarization_spec(temperature: float = 0.3, device: str = "cpu") -> RunSpec:
     scenario_spec = ScenarioSpec(
         class_name="helm.benchmark.scenarios.legal_summarization_scenario.LegalSummarizationScenario",
@@ -1901,6 +2016,7 @@ def get_eurlexsum_legal_summarization_spec(temperature: float = 0.3, device: str
     )
 
 
+@run_spec_function("wmt_14")
 def get_wmt_14_spec(language_pair: str, max_train_instances: int = 1) -> RunSpec:
     FULL_LANGUAGE_NAMES = {
         "cs": "Czech",
@@ -1932,6 +2048,88 @@ def get_wmt_14_spec(language_pair: str, max_train_instances: int = 1) -> RunSpec
     )
 
 
+@run_spec_function("self_instruct")
+def get_self_instruct_spec() -> RunSpec:
+    scenario_spec = ScenarioSpec(
+        class_name="helm.benchmark.scenarios.self_instruct_scenario.SelfInstructScenario",
+        args={},
+    )
+
+    adapter_spec = get_instruct_adapter_spec()
+
+    return RunSpec(
+        name="self_instruct",
+        scenario_spec=scenario_spec,
+        adapter_spec=adapter_spec,
+        metric_specs=get_open_ended_generation_metric_specs() + get_generative_harms_metric_specs(),
+        groups=["self_instruct"],
+    )
+
+
+@run_spec_function("vicuna")
+def get_vicuna_spec(category: str = "all") -> RunSpec:
+    scenario_spec = ScenarioSpec(
+        class_name="helm.benchmark.scenarios.vicuna_scenario.VicunaScenario",
+        args={"category": category},
+    )
+
+    adapter_spec = get_instruct_adapter_spec()
+
+    return RunSpec(
+        name=f"vicuna:category={category}",  # TODO: add args
+        scenario_spec=scenario_spec,
+        adapter_spec=adapter_spec,
+        metric_specs=get_open_ended_generation_metric_specs() + get_generative_harms_metric_specs(),
+        groups=["vicuna"],
+    )
+
+
+@run_spec_function("grammar")
+def get_grammar_spec(path: str, tags: str) -> RunSpec:
+    scenario_spec = ScenarioSpec(
+        class_name="helm.benchmark.scenarios.grammar_scenario.GrammarScenario",
+        args={"path": path, "tags": tags},
+    )
+
+    adapter_spec = get_instruct_adapter_spec()
+
+    return RunSpec(
+        name=f"grammar:path={path},tags={tags}",
+        scenario_spec=scenario_spec,
+        adapter_spec=adapter_spec,
+        metric_specs=get_open_ended_generation_metric_specs() + get_generative_harms_metric_specs(),
+        groups=["grammar"],
+    )
+
+
+@run_spec_function("verifiability_judgment")
+def get_verifiability_judgment_spec() -> RunSpec:
+    scenario_spec = ScenarioSpec(
+        class_name="helm.benchmark.scenarios.verifiability_judgment_scenario.VerifiabilityJudgementScenario", args={}
+    )
+
+    adapter_spec = get_generation_adapter_spec(
+        instructions=(
+            'Given the statement and its source, judge whether the source "fully supports", '
+            '"partially supports" or "does not support" the statement.'
+        ),
+        input_noun="Statement",
+        # Add another new line before the output noun, since the source might have
+        # newlines embedded in it.
+        output_noun="\nJudgment",
+        max_tokens=10,
+    )
+
+    return RunSpec(
+        name="verifiability_judgment",
+        scenario_spec=scenario_spec,
+        adapter_spec=adapter_spec,
+        metric_specs=get_verifiability_judgment_metric_specs(),
+        groups=["verifiability_judgment"],
+    )
+
+
+@run_spec_function("opinions_qa")
 def get_opinions_qa_spec(
     survey_type: str,
     num_logprobs: str,
@@ -1966,69 +2164,61 @@ def get_opinions_qa_spec(
     )
 
 
-############################################################
+@run_spec_function("open_assistant")
+def get_open_assistant_spec(language: str) -> RunSpec:
+    scenario_spec = ScenarioSpec(
+        class_name="helm.benchmark.scenarios.open_assistant_scenario.OpenAssistantScenario",
+        args={"language": language},
+    )
 
-CANONICAL_RUN_SPEC_FUNCS: Dict[str, Callable[..., RunSpec]] = {
-    "simple1": get_simple1_spec,
-    "boolq": get_boolq_spec,
-    "imdb": get_imdb_spec,
-    "copyright": get_copyright_spec,
-    "mmlu": get_mmlu_spec,
-    "interactive_qa_mmlu": get_interactive_qa_mmlu_spec,
-    "msmarco": get_msmarco_spec,
-    "narrative_qa": get_narrativeqa_spec,
-    "commonsense": get_commonsense_spec,
-    "lsat_qa": get_lsat_qa_spec,
-    "quac": get_quac_spec,
-    "wikifact": get_wikifact_spec,
-    "babi_qa": get_babi_qa_spec,
-    "real_toxicity_prompts": get_real_toxicity_prompts_spec,
-    "summarization_xsum": get_xsum_summarization_spec,
-    "summarization_xsum_sampled": get_xsum_sampled_summarization_spec,
-    "summarization_cnndm": get_cnndm_summarization_spec,
-    "truthful_qa": get_truthful_qa_spec,
-    "twitter_aae": get_twitter_aae_spec,
-    "disinformation": get_disinformation_spec,
-    "gsm": get_gsm_spec,
-    "math": get_math_spec,
-    "natural_qa": get_natural_qa_spec,
-    "numeracy": get_numeracy_spec,
-    "the_pile": get_the_pile_spec,
-    "raft": get_raft_spec,
-    "synthetic_efficiency": get_synthetic_efficiency_spec,
-    "synthetic_reasoning": get_synthetic_reasoning_spec,
-    "synthetic_reasoning_natural": get_synthetic_reasoning_natural_spec,
-    "news_qa": get_news_qa_spec,
-    "wikitext_103": get_wikitext_103_spec,
-    "blimp": get_blimp_spec,
-    "code": get_code_spec,
-    "empatheticdialogues": get_empatheticdialogues_spec,
-    "bold": get_bold_spec,
-    "bbq": get_bbq_spec,
-    "civil_comments": get_civil_comments_spec,
-    "dyck_language": get_dyck_language_spec,
-    "entity_matching": get_entity_matching_spec,
-    "entity_data_imputation": get_entity_data_imputation_spec,
-    "ice": get_ice_spec,
-    "big_bench": get_big_bench_spec,
-    "wmt_14": get_wmt_14_spec,
-    # Legal
-    "legal_support": get_legal_support_spec,
-    "lextreme": get_lextreme_spec,
-    "lex_glue": get_lex_glue_spec,
-    "billsum_legal_summarization": get_billsum_legal_summarization_spec,
-    "multilexsum_legal_summarization": get_multilexsum_legal_summarization_spec,
-    "eurlexsum_legal_summarization": get_eurlexsum_legal_summarization_spec,
-    # Biomedical
-    "covid_dialog": get_covid_dialog_spec,
-    "me_q_sum": get_me_q_sum_spec,
-    "med_dialog": get_med_dialog_spec,
-    "med_mcqa": get_med_mcqa_spec,
-    "med_paragraph_simplification": get_med_paragraph_simplification_spec,
-    "med_qa": get_med_qa_spec,
-    "pubmed_qa": get_pubmed_qa_spec,
-    "opinions_qa": get_opinions_qa_spec,
-}
+    adapter_spec = get_instruct_adapter_spec()
+
+    return RunSpec(
+        name=f"open_assistant:language={language}",
+        scenario_spec=scenario_spec,
+        adapter_spec=adapter_spec,
+        metric_specs=get_open_ended_generation_metric_specs() + get_generative_harms_metric_specs(),
+        groups=["open_assistant"],
+    )
+
+
+@run_spec_function("koala")
+def get_koala_spec() -> RunSpec:
+    scenario_spec = ScenarioSpec(
+        class_name="helm.benchmark.scenarios.koala_scenario.KoalaScenario",
+        args={},
+    )
+
+    adapter_spec = get_instruct_adapter_spec()
+
+    return RunSpec(
+        name="koala",
+        scenario_spec=scenario_spec,
+        adapter_spec=adapter_spec,
+        metric_specs=get_open_ended_generation_metric_specs() + get_generative_harms_metric_specs(),
+        groups=["koala"],
+    )
+
+
+@run_spec_function("anthropic_hh_rlhf")
+def get_anthropic_hh_rlhf_spec(subset: str) -> RunSpec:
+    scenario_spec = ScenarioSpec(
+        class_name="helm.benchmark.scenarios.anthropic_hh_rlhf_scenario.AnthropicHHRLHFScenario",
+        args={"subset": subset},
+    )
+
+    adapter_spec = get_instruct_adapter_spec()
+
+    return RunSpec(
+        name=f"anthropic_hh_rlhf:subset={subset}",
+        scenario_spec=scenario_spec,
+        adapter_spec=adapter_spec,
+        metric_specs=get_open_ended_generation_metric_specs() + get_generative_harms_metric_specs(),
+        groups=["anthropic_hh_rlhf"],
+    )
+
+
+############################################################
 
 
 def construct_run_specs(spec: ObjectSpec) -> List[RunSpec]:
@@ -2079,6 +2269,28 @@ def construct_run_specs(spec: ObjectSpec) -> List[RunSpec]:
         if CHATML_MODEL_TAG in model.tags:
             chatml_expander = ChatMLRunExpander()
             run_spec = singleton(chatml_expander.expand(run_spec))
+
+        if ANTHROPIC_MODEL_TAG in model.tags:
+            add_to_stop_expander = AddToStopRunExpander(anthropic.HUMAN_PROMPT)
+            increase_max_tokens_expander = IncreaseMaxTokensRunExpander(value=AnthropicClient.ADDITIONAL_TOKENS)
+            # Get scenario tags
+            components = run_spec.scenario_spec.class_name.split(".")
+            module: Any = __import__(components[0])
+            for component in components[1:]:
+                module = getattr(module, component)
+            scenario_tags: List[str] = module.tags
+            # If the scenario is instruction, do not use PROMPT_ANSWER_START
+            if "instructions" in scenario_tags:
+                format_expander = FormatPromptRunExpander(
+                    prefix=anthropic.HUMAN_PROMPT, suffix=f"{anthropic.AI_PROMPT}"
+                )
+            else:
+                format_expander = FormatPromptRunExpander(
+                    prefix=anthropic.HUMAN_PROMPT, suffix=f"{anthropic.AI_PROMPT} {AnthropicClient.PROMPT_ANSWER_START}"
+                )
+            run_spec = singleton(add_to_stop_expander.expand(run_spec))
+            run_spec = singleton(increase_max_tokens_expander.expand(run_spec))
+            run_spec = singleton(format_expander.expand(run_spec))
 
         # For multiple choice
         if BUGGY_TEMP_0_TAG in model.tags and run_spec.adapter_spec.temperature == 0:

@@ -3,6 +3,7 @@ from dataclasses import replace
 from typing import List, Dict, Optional, Tuple, Type
 
 from helm.proxy.models import (
+    get_all_instruction_following_models,
     get_all_code_models,
     get_all_models,
     get_all_text_models,
@@ -238,6 +239,32 @@ class StopRunExpander(RunExpander):
         ]
 
 
+class AddToStopRunExpander(RunExpander):
+    """
+    Add a stop sequence to the stop sequences. (Not like StopRunExpander, which replaces the stop sequences.)
+    """
+
+    name = "add_to_stop"
+
+    def __init__(self, value):
+        """
+        Args:
+            value(str): Either the actual value to use or a lookup into the values dict.
+        """
+        self.value = value
+
+    def expand(self, run_spec: RunSpec) -> List[RunSpec]:
+        return [
+            replace(
+                run_spec,
+                name=run_spec.name,
+                adapter_spec=replace(
+                    run_spec.adapter_spec, stop_sequences=run_spec.adapter_spec.stop_sequences + [self.value]
+                ),
+            ),
+        ]
+
+
 class GlobalPrefixRunExpander(RunExpander):
     """For overriding global prefix for specific models."""
 
@@ -258,6 +285,29 @@ class GlobalPrefixRunExpander(RunExpander):
                 name=f"{run_spec.name},{self.name}={self.value}",
                 adapter_spec=replace(run_spec.adapter_spec, global_prefix=prefix),
             )
+        ]
+
+
+class FormatPromptRunExpander(RunExpander):
+    """Adds a prefix and suffix to the prompt."""
+
+    name = "format_prompt"
+
+    def __init__(self, prefix: str = "", suffix: str = ""):
+        self.prefix = prefix
+        self.suffix = suffix
+
+    def expand(self, run_spec: RunSpec) -> List[RunSpec]:
+        return [
+            replace(
+                run_spec,
+                name=run_spec.name,
+                adapter_spec=replace(
+                    run_spec.adapter_spec,
+                    global_prefix=self.prefix,
+                    output_prefix=self.suffix,
+                ),
+            ),
         ]
 
 
@@ -324,6 +374,7 @@ class ModelRunExpander(ReplaceValueRunExpander):
             "text_code": get_all_text_models() + get_all_code_models(),
             "text": get_all_text_models(),
             "code": get_all_code_models(),
+            "instruction_following": get_all_instruction_following_models(),
             "limited_functionality_text": get_model_names_with_tag(LIMITED_FUNCTIONALITY_TEXT_MODEL_TAG),
             "gpt2_tokenizer": get_model_names_with_tag(GPT2_TOKENIZER_TAG),
             "ai21_tokenizer": get_model_names_with_tag(AI21_TOKENIZER_TAG),
@@ -764,7 +815,7 @@ class TokenizerRunExpander(ScenarioSpecRunExpander):
         "AlephAlpha/luminous-supreme": ["AlephAlpha/luminous-supreme"],
         "AlephAlpha/luminous-world": ["AlephAlpha/luminous-world"],
         "huggingface/santacoder": ["bigcode/santacoder"],
-        "huggingface/large-model": ["bigcode/large-model"],
+        "huggingface/starcoder": ["bigcode/starcoder"],
     }
     model_tags_and_tokenizers = [
         (GPT2_TOKENIZER_TAG, "huggingface/gpt2"),
@@ -992,6 +1043,8 @@ RUN_EXPANDER_SUBCLASSES: List[Type[RunExpander]] = [
     PromptRunExpander,
     NewlineRunExpander,
     StopRunExpander,
+    FormatPromptRunExpander,
+    AddToStopRunExpander,
     GlobalPrefixRunExpander,
     NumTrainTrialsRunExpander,
     MaxTrainInstancesRunExpander,

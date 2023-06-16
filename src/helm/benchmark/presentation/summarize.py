@@ -25,9 +25,9 @@ from helm.benchmark.adaptation.adapter_spec import AdapterSpec
 from helm.benchmark.metrics.metric_name import MetricName
 from helm.benchmark.metrics.metric import get_all_stats_by_name
 from helm.benchmark.metrics.statistic import Stat, merge_stat
-from helm.benchmark.runner import RunSpec
-from helm.benchmark.presentation.table import Cell, HeaderCell, Table, Hyperlink, table_to_latex
-from helm.benchmark.presentation.schema import MetricNameMatcher, RunGroup, read_schema, SCHEMA_YAML_FILENAME, BY_GROUP, THIS_GROUP_ONLY, NO_GROUPS
+from helm.benchmark.runner import RunSpec, LATEST_SYMLINK
+from .table import Cell, HeaderCell, Table, Hyperlink, table_to_latex
+from .schema import MetricNameMatcher, RunGroup, read_schema, SCHEMA_YAML_FILENAME, BY_GROUP, THIS_GROUP_ONLY, NO_GROUPS
 
 from helm.benchmark.presentation.contamination import (
     read_contamination,
@@ -940,11 +940,24 @@ class Summarizer:
                 json.dumps(list(map(asdict_without_nones, tables)), indent=2),
             )
 
-    def write_run_display_json(self) -> None:
+    def write_run_display_json(self, skip_completed: bool) -> None:
         def process(run: Run) -> None:
-            write_run_display_json(run.run_path, run.run_spec, self.schema)
+            write_run_display_json(run.run_path, run.run_spec, self.schema, skip_completed)
 
         parallel_map(process, self.runs, parallelism=self.num_threads)
+
+
+def symlink_latest(output_path: str, suite: str) -> None:
+    # Create a symlink runs/latest -> runs/<name_of_suite>,
+    # so runs/latest always points to the latest run suite.
+    runs_dir: str = os.path.join(output_path, "runs")
+    suite_dir: str = os.path.join(runs_dir, suite)
+    symlink_path: str = os.path.abspath(os.path.join(runs_dir, LATEST_SYMLINK))
+    hlog(f"Symlinking {suite_dir} to {LATEST_SYMLINK}.")
+    if os.path.islink(symlink_path):
+        # Remove the previous symlink if it exists.
+        os.unlink(symlink_path)
+    os.symlink(os.path.abspath(suite_dir), symlink_path)
 
 
 @htrack(None)
@@ -966,9 +979,9 @@ def main():
         help="Display debugging information.",
     )
     parser.add_argument(
-        "--skip-write-run-display-json",
+        "--skip-completed-run-display-json",
         action="store_true",
-        help="Skip write_run_display_json",
+        help="Skip write_run_display_json() for runs which already have all output display JSON files",
     )
     args = parser.parse_args()
 
@@ -985,9 +998,9 @@ def main():
     summarizer.write_groups()
     summarizer.write_cost_report()
 
-    if not args.skip_write_run_display_json:
-        summarizer.write_run_display_json()
+    summarizer.write_run_display_json(skip_completed=args.skip_completed_run_display_json)
 
+    symlink_latest(args.output_path, args.suite)
     hlog("Done.")
 
 

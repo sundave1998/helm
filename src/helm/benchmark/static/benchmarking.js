@@ -89,8 +89,8 @@ $(function () {
       $('<td>').append('Scenario'),
       $('<td>').append('Task'),
       $('<td>').append('What'),
-      $('<td>').append('When'),
       $('<td>').append('Who'),
+      $('<td>').append('When'),
       $('<td>').append('Language'),
       $('<td>').append('Description'),
     ]);
@@ -575,7 +575,7 @@ $(function () {
           \{trial {{prediction.train_trial_index~}} \}
         {{~/if~}}
       </a></strong>:
-      {{{predictedText}}}
+      <span class="prediction-text">{{{predictedText}}}</span>
     </div>
     <div class="request" style="display: none">Loading...</div>
   `);
