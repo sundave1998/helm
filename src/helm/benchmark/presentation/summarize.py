@@ -342,6 +342,7 @@ class Summarizer:
             suite=self.suite,
             date=date,
         )
+        print("ybsun: writing summary json at:", self.run_suite_path )
         write(
             os.path.join(self.run_suite_path, "summary.json"),
             json.dumps(asdict_without_nones(summary), indent=2),

@@ -38,6 +38,7 @@ class AutoClient(Client):
     """Automatically dispatch to the proper `Client` based on the organization."""
 
     def __init__(self, credentials: Dict[str, str], cache_path: str, mongo_uri: str = ""):
+        print("ybsun: setting up auto client")
         self.credentials = credentials
         self.cache_path = cache_path
         self.mongo_uri = mongo_uri

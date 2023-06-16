@@ -99,6 +99,7 @@ def register_huggingface_model_config(model_name: str, display_name: str = None,
     model_name format: namespace/model_name[@revision] OR just a path to your HF model"""
     if local:
         config = HuggingFaceModelConfig.from_path(model_name)
+        print("local config", config)
     else:
         config = HuggingFaceModelConfig.from_string(model_name)
     if config.model_id in _huggingface_model_registry:

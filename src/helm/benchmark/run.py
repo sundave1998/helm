@@ -17,7 +17,7 @@ from helm.benchmark.runner import Runner, RunSpec
 from helm.benchmark.run_specs import construct_run_specs
 
 import transformers
-from helm.models.modeling_megatron_llama import MegatronLlamaForCausalLM, MegatronLlamaConfig
+# from helm.models.modeling_megatron_llama import MegatronLlamaForCausalLM, MegatronLlamaConfig
 
 LATEST_SYMLINK: str = "latest"
 
@@ -243,8 +243,9 @@ def main():
     validate_args(args)
 
     # dawei: register local model
-    transformers.AutoConfig.register(MegatronLlamaConfig.model_type, MegatronLlamaConfig)
-    transformers.AutoModelForCausalLM.register(MegatronLlamaConfig, MegatronLlamaForCausalLM)
+    
+    # transformers.AutoConfig.register(MegatronLlamaConfig.model_type, MegatronLlamaConfig)
+    # transformers.AutoModelForCausalLM.register(MegatronLlamaConfig, MegatronLlamaForCausalLM)
 
     for huggingface_model_name in args.enable_huggingface_models:
         register_huggingface_model_config(huggingface_model_name)
@@ -253,9 +254,10 @@ def main():
         display_name = "/".join(huggingface_model_path.split("/")[-3:])
         register_huggingface_model_config(huggingface_model_path, display_name=display_name, local=True)
 
+    if args.enable_local_huggingface_models:
+        args.local = True
     if not args.local:
         check_and_register_remote_model(args.server_url, args.enable_remote_models)
-
     run_entries: List[RunEntry] = []
     if args.conf_paths:
         run_entries.extend(read_run_entries(args.conf_paths).entries)
@@ -263,7 +265,7 @@ def main():
         run_entries.extend(
             [RunEntry(description=description, priority=1, groups=None) for description in args.run_specs]
         )
-
+    print("ybsun: preparing for running..")
     run_specs = run_entries_to_run_specs(
         run_entries=run_entries,
         max_eval_instances=args.max_eval_instances,

@@ -48,10 +48,50 @@ class HuggingFaceServer:
         model_kwargs = {}
         if model_config.revision:
             model_kwargs["revision"] = model_config.revision
+        print("current model config is as follows:", model_config)
         with htrack_block(f"Loading Hugging Face model for config {model_config}"):
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_config.model_id, trust_remote_code=True, **model_kwargs
-            ).to(self.device)
+            # self.model = AutoModelForCausalLM.from_pretrained(
+            #     model_config.model_id, trust_remote_code=True, **model_kwargs
+            # ).to(self.device)
+            import sys
+            # import os
+            # file_dir = os.path.join(os.path.dirname(__file__), '..')
+            # file_dir = os.path.join(file_dir, '..')
+            # file_dir = os.path.join(file_dir, '..')
+            # file_dir = os.path.join(file_dir, '..')
+            file_dir = '/mnt/data/youbangsun/FederatedScope'
+            sys.path.append(file_dir)
+            from federatedscope.core.configs.config import global_cfg, CfgNode
+            # from federatedscope.core.auxiliaries.model_builder import get_model
+            init_cfg = global_cfg.clone()
+
+            init_cfg.merge_from_file("/mnt/data/youbangsun/FederatedScope/llama_DP.yaml")
+            init_cfg.wandb.use = False
+            init_cfg.nbafl.use_opacus = False
+            init_cfg.nbafl.use = False
+            
+            # self.model = get_model(client_specific_config)
+            print("configs loaded, getting llm using fedscope")
+            try:
+
+                from federatedscope.llm.model import get_llm
+                self.model = get_llm(init_cfg).to(self.device)
+            except:
+                print("getllm failed")
+            try:
+                def load_model(model, path):
+                    if os.path.exists(path):
+                        ckpt = torch.load(path, map_location=self.device)
+                        model.load_state_dict(ckpt['model'])
+                        print("checkpoint loaded, current iteration is:", ckpt['cur_round'])
+                        return model
+                ckpt_path = "/mnt/data/youbangsun/FederatedScope/llama.ckpt"
+                self.model = load_model(self.model, ckpt_path)
+            except:
+                print("load checkpoint error!!")
+            
+            
+            
         hlog(f"{type(self.model)}, {self.model.__class__}")
         with htrack_block(f"Loading Hugging Face tokenizer model for config {model_config}"):
             self.tokenizer = AutoTokenizer.from_pretrained(model_config.model_id, **model_kwargs)
@@ -81,7 +121,9 @@ class HuggingFaceServer:
 
         # dawei: resolve the bug for huggingface
         # Use HuggingFace's `generate` method.
-        del encoded_input['token_type_ids']
+        print("encoded_input", encoded_input)
+        # if encoded_input.has_key('token_type_ids'):
+        #     del encoded_input['token_type_ids']
         output = self.model.generate(**encoded_input, **relevant_raw_request)
         sequences = output.sequences
         scores = output.scores

@@ -94,7 +94,9 @@ class Model:
         Extracts the model engine from the model name.
         Example: 'ai21/j1-jumbo' => 'j1-jumbo'
         """
-        return self.name.split("/")[1]
+        if len(self.name.split("/"))>1:
+            return self.name.split("/")[1]
+        else: return self.name.split("/")[0]
 
 
 # For the list of available models, see the following docs:
@@ -770,6 +772,13 @@ ALL_MODELS = [
         display_name="Simple Model 1",
         description="Copy last tokens (for debugging)",
     ),
+    # Model(
+    #     group="youbang",
+    #     creator_organization="damo",
+    #     name="damo/llama",
+    #     display_name="llama-7b",
+    #     description="llama-7b model for evaluate on FL",
+    # ),
 ]
 
 MODEL_NAME_TO_MODEL: Dict[str, Model] = {model.name: model for model in ALL_MODELS}
